@@ -3,12 +3,15 @@
 from llama_cpp import Llama
 from ddgs import DDGS
 import threading
+import os
 
 model_lock = threading.Lock()
+token = os.environ.get("HUGGINGFACE_TOKEN")
 
 llm = Llama.from_pretrained(
     repo_id="TheBloke/OpenHermes-2.5-Mistral-7B-GGUF",
     filename="openhermes-2.5-mistral-7b.Q2_K.gguf",
+    token=token
 )
 
 def search_web(query, max_results=3):
