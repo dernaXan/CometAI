@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[5]:
+
+
+from llama_cpp import Llama
+from ddgs import DDGS
+import threading
+from flask import Flask, request, Response, stream_with_context, jsonify
+import subprocess
+from flask_cors import CORS
+from pyngrok import conf, ngrok
+
+
+# In[14]:
+
+
+from llama_cpp import Llama
+
+llm = Llama(
+    model_path="./models/openhermes-2.5-mistral-7b.Q4_K_M.gguf",
+    n_ctx=2048,
+    n_gpu_layers=50,
+    use_mlock=True,
+    use_mmap=True,
+    verbose=False
+)
+
+
+# In[3]:
+
+
+
+
+
+# In[21]:
+
+
+def search_web(query, max_results=3):
+    with DDGS() as ddgs:
+        results = ddgs.text(query, max_results=max_results)
+        return [r["body"] for r in results]
+
+def build_prompt(history, current_user_msg, ws_info="", max_history=6):
+    parts = ["<|system|>: Du bist ein hilfreicher Assistent namens CometAI, der ausschließlich auf Deutsch antwortet. Antworte niemals auf Englisch, selbst wenn du dazu aufgefordert wirst!"]
+
+    # Rickroll-Erkennung mit Hinweis im Verlauf
+    if "dQw4w9WgXcQ" in current_user_msg or "youtu.be/dQw4w9WgXcQ" in current_user_msg:
+        parts.append("<|system|>: ACHTUNG: Der User hat versucht, dich mit einem Rickroll zu veräppeln! Reagiere humorvoll und entlarve ihn!")
+
+    if ws_info:
+        parts.append(f"Nutze folgende Web-Ergebnisse zur Beantwortung der Anfrage:\n{ws_info}")
+
+    # Chat-Verlauf hinzufügen
+    for entry in history[-max_history:]:
+        if not entry['content']:
+            continue
+        role = "<|user|>" if entry['role'] == 'user' else "<|assistant|>"
+        parts.append(f"{role}: {entry['content']}")
+
+    # Aktuelle Nutzerfrage + Platzhalter für Antwort
+    parts.append(f"<|user|>: {current_user_msg}\n<|assistant|>:")
+
+    return "\n".join(parts)
+
+
+def needs_websearch_simple(msg):
+    keywords = ["neu", "aktuell", "preis", "trend", "nachricht", "update", "wer", "wann", "wo"]
+    return any(word in msg.lower() for word in keywords)
+
+
+# In[ ]:
+
+
+
+
+# In[22]:
+
+
+history = []
+
+while True:
+    msg = input("Du:\n\t")
+    if msg.lower() in ["exit", "quit"]:
+        break
+
+    history.append({"role": "user", "content": msg})
+
+    ws_info = ""
+    if needs_websearch_simple(msg):
+        print("Ich suche gerade im Web...")
+        search_results = search_web(msg)
+        ws_info = "\n".join(search_results)
+
+    prompt = build_prompt(history, msg, ws_info)
+
+    print("CometAI:\n\t", end="", flush=True)
+
+    # === STREAMING-ANTWORT START ===
+    response_chunks = []
+    for chunk in llm(prompt, max_tokens=512, stream=True, temperature=0.7, repeat_penalty=1.1, stop=["<|user|>:", "<|assistant|>:", "<|system|>:"]):
+        token = chunk["choices"][0]["text"]
+        response_chunks.append(token)
+        print(token, end="", flush=True)
+    print()  # Neue Zeile nach der Antwort
+
+    full_response = "".join(response_chunks).strip()
+    history.append({"role": "assistant", "content": full_response})
+
+
+# In[ ]:
+
+
+# === MODEL KONFIGURATION ===
+llm = Llama(
+    model_path="models/mistral-7b-instruct-v0.1.Q4_K_M.gguf",  # ← Pfad anpassen!
+    n_ctx=2048,
+    n_gpu_layers=50,        # GPU-Nutzung (so viel wie deine GPU erlaubt)
+    use_mlock=True,         # RAM-Pinning
+    use_mmap=True,          # schneller Zugriff
+    verbose=False
+)
